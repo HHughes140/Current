@@ -1,0 +1,37 @@
+# Insurance Loss Ratio Nowcast — Configuration
+# Copy this to config.local.yaml and fill in your API key.
+
+fred:
+  api_key: "YOUR_FRED_API_KEY_HERE"
+
+# Historical lookback for regression training
+history:
+  start_year: 2014
+  end_year: 2025
+
+# Carrier universe — tickers to include in nowcast
+carriers:
+  - PGR
+  - TRV
+  - ALL
+  - CB
+  - RNR
+  - AIG
+  - HIG
+  - CNA
+
+# Consensus loss ratio estimates for current quarter (manual input)
+# Update these before running nowcast
+consensus:
+  PGR: null
+  TRV: null
+  ALL: null
+  CB: null
+  RNR: null
+  AIG: null
+  HIG: null
+  CNA: null
+
+# Data paths
+data_dir: "data"
+model_dir: "data/models"

@@ -1,0 +1,12 @@
+data/
+*.parquet
+*.pkl
+*.joblib
+config.local.yaml
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
