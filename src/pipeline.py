@@ -134,6 +134,49 @@ def model(ctx):
             click.echo(f"    {feat}: {imp:.4f}")
 
 
+@cli.command("learn")
+@click.pass_context
+def learn_fingerprints(ctx):
+    """Learn execution fingerprints from historical 13F + daily volume.
+
+    For each institution, learns the volume signature that accompanies
+    accumulation vs. distribution. Requires 13F data to be ingested first.
+    """
+    data_dir = ctx.obj["data_dir"]
+    model_dir = ctx.obj["model_dir"]
+
+    holdings = edgar_13f.load_holdings(data_dir)
+    if holdings is None or holdings.empty:
+        click.echo("Error: Run 'pressure ingest' first.", err=True)
+        sys.exit(1)
+
+    click.echo("Building historical volume profiles (this may take a while)...")
+    profiles = accumulation.build_profiles_from_cache(holdings, data_dir)
+
+    if profiles.empty:
+        click.echo("No profiles could be built. Check that holdings data has position changes.")
+        return
+
+    click.echo(f"  Built {len(profiles)} quarterly volume profiles")
+
+    click.echo("Learning execution fingerprints...")
+    fingerprints = accumulation.learn_fingerprints(profiles)
+
+    if not fingerprints:
+        click.echo("  Could not learn any fingerprints (insufficient data per institution)")
+        return
+
+    accumulation.save_fingerprints(fingerprints, model_dir)
+
+    for inst_key, fp in fingerprints.items():
+        click.echo(f"  {inst_key}: AUC={fp.auc:.3f}, n={fp.n_training_samples}")
+        top3 = list(fp.feature_importances.items())[:3]
+        for feat, imp in top3:
+            click.echo(f"    {feat}: {imp:.4f}")
+
+    click.echo(f"\nSaved {len(fingerprints)} fingerprints.")
+
+
 @cli.command()
 @click.pass_context
 def score(ctx):
@@ -200,7 +243,31 @@ def score(ctx):
 
     # Accumulation detection — link 13F streaks to current volume
     click.echo("Detecting accumulation patterns...")
-    accum_signals = accumulation.detect_accumulation(holdings, vol)
+    fingerprints = accumulation.load_fingerprints(model_dir)
+
+    # Fetch current daily data for fingerprint matching
+    current_daily: dict[str, pd.DataFrame] = {}
+    if fingerprints:
+        click.echo("  Using learned execution fingerprints")
+        import yfinance as yf
+        tickers_in_holdings = holdings["ticker"].unique()
+        for ticker in tickers_in_holdings:
+            try:
+                t = yf.Ticker(ticker)
+                hist = t.history(period="3mo", auto_adjust=True)
+                if not hist.empty:
+                    hist.index = hist.index.tz_localize(None)
+                    current_daily[ticker] = hist[["Volume", "Close"]]
+            except Exception:
+                pass
+    else:
+        click.echo("  No fingerprints found — using volume heuristics (run 'pressure learn' to train)")
+
+    accum_signals = accumulation.detect_accumulation(
+        holdings, vol,
+        fingerprints=fingerprints,
+        current_daily=current_daily if current_daily else None,
+    )
     accum_summary = accumulation.summarize_by_stock(accum_signals)
 
     # Volume predictions
@@ -301,9 +368,10 @@ def detail(ctx, ticker):
 @click.option("--force", is_flag=True)
 @click.pass_context
 def run(ctx, force):
-    """Full pipeline: ingest -> model -> score -> report."""
+    """Full pipeline: ingest -> model -> learn -> score -> report."""
     ctx.invoke(ingest, force=force)
     ctx.invoke(model)
+    ctx.invoke(learn_fingerprints)
     ctx.invoke(score)
 
 
