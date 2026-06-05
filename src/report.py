@@ -12,6 +12,7 @@ from rich.text import Text
 from rich.panel import Panel
 
 from src.model.pressure_score import PressureResult
+from src.model.accumulation import AccumulationSignal
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,65 @@ def print_terminal_report(results: list[PressureResult]) -> None:
 
     # ETF sector flow summary
     console.print("[dim]Score range: -100 (distribution) to +100 (accumulation)[/dim]")
+    console.print()
+
+
+def print_accumulation_report(
+    signals: list[AccumulationSignal],
+    summary: "pd.DataFrame",
+) -> None:
+    """Print accumulation/distribution patterns detected from 13F streaks + volume."""
+    console = Console()
+    import pandas as pd
+
+    console.print()
+    console.print(Panel(
+        "[bold]Accumulation / Distribution Detection[/bold]\n"
+        "13F position streaks cross-referenced with current volume",
+        style="cyan",
+    ))
+
+    # Per-stock summary
+    if not summary.empty:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Ticker", width=6)
+        table.add_column("Direction", width=12)
+        table.add_column("# Accum", justify="right", width=8)
+        table.add_column("# Distrib", justify="right", width=8)
+        table.add_column("Cont. Prob", justify="right", width=10)
+        table.add_column("Vol Confirmed", justify="right", width=13)
+        table.add_column("Top Accumulator", width=22)
+
+        for _, row in summary.iterrows():
+            dir_style = "green" if row["net_direction"] == "ACCUMULATE" else (
+                "red" if row["net_direction"] == "DISTRIBUTE" else "yellow"
+            )
+            table.add_row(
+                row["ticker"],
+                Text(row["net_direction"], style=dir_style),
+                str(row["n_accumulating"]),
+                str(row["n_distributing"]),
+                f"{row['avg_continuation_prob']:.0%}",
+                str(row["volume_confirmed_count"]),
+                str(row.get("top_accumulator", "—") or "—"),
+            )
+
+        console.print(table)
+
+    # Top individual signals
+    active_accum = [s for s in signals if s.direction == "ACCUMULATING" and s.style == "active"]
+    if active_accum:
+        console.print()
+        console.print("[bold]Active Fund Accumulation Streaks[/bold]")
+        for s in active_accum[:10]:
+            vol_icon = "volume confirms" if s.volume_confirms else "volume inconclusive"
+            color = "green" if s.volume_confirms else "yellow"
+            console.print(
+                f"  [bold]{s.ticker}[/bold] ← {s.institution_name}: "
+                f"{s.consecutive_buys}Q streak, {s.total_change_pct:+.1f}% total, "
+                f"[{color}]{vol_icon}[/{color}] "
+                f"(P={s.continuation_probability:.0%})"
+            )
     console.print()
 
 

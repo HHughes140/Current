@@ -21,7 +21,7 @@ import yaml
 
 from src.universe import INSTITUTION_REGISTRY, ALL_TICKERS, INSURANCE_UNIVERSE
 from src.data import edgar_13f, factors, volume, options, etf_flows, fred_rates, cache
-from src.model import demand_model, residual, volume_model, pressure_score
+from src.model import demand_model, residual, volume_model, pressure_score, accumulation
 from src import report
 
 logger = logging.getLogger(__name__)
@@ -151,11 +151,39 @@ def score(ctx):
         click.echo("Error: No holdings data. Run 'pressure ingest' first.", err=True)
         sys.exit(1)
 
-    # Compute residuals
+    model_dir = ctx.obj["model_dir"]
+
+    # Use trained demand model if available, otherwise neutral baseline
     click.echo("Computing institutional residuals...")
-    # For now, use a simple expected probability (no trained model required)
+    trained = demand_model.load_models(model_dir)
     holdings_with_expected = holdings.copy()
-    holdings_with_expected["expected_buy_prob"] = 0.5  # Neutral baseline
+
+    if trained:
+        click.echo("  Using trained demand model for expected probabilities")
+        # Apply trained model to compute expected buy probability per holding
+        for style_key in ["passive", "active"]:
+            if style_key not in trained:
+                continue
+            m = trained[style_key]
+            style_mask = holdings_with_expected["style"] == style_key
+            style_holdings = holdings_with_expected[style_mask]
+            if style_holdings.empty:
+                continue
+
+            features = [f for f in demand_model.FACTOR_FEATURES if f in fac.columns]
+            if features and not fac.empty:
+                merged = style_holdings.merge(fac[["ticker"] + features], on="ticker", how="left")
+                X, used_features = demand_model._prepare_features(merged)
+                for f in m["scaler"].feature_names_in_:
+                    if f not in X.columns:
+                        X[f] = 0
+                X = X[list(m["scaler"].feature_names_in_)]
+                X_scaled = m["scaler"].transform(X)
+                proba = m["model"].predict_proba(X_scaled)[:, 1]
+                holdings_with_expected.loc[style_mask, "expected_buy_prob"] = proba
+    else:
+        click.echo("  No trained model found — using neutral baseline (run 'pressure model' first for better residuals)")
+        holdings_with_expected["expected_buy_prob"] = 0.5
 
     resid = residual.compute_institution_residuals(
         holdings_with_expected,
@@ -169,6 +197,11 @@ def score(ctx):
 
     # Ownership concentration
     ownership = residual.compute_ownership_concentration(holdings)
+
+    # Accumulation detection — link 13F streaks to current volume
+    click.echo("Detecting accumulation patterns...")
+    accum_signals = accumulation.detect_accumulation(holdings, vol)
+    accum_summary = accumulation.summarize_by_stock(accum_signals)
 
     # Volume predictions
     click.echo("Predicting volume spikes...")
@@ -190,6 +223,10 @@ def score(ctx):
 
     # Output
     report.print_terminal_report(results)
+
+    # Print accumulation signals if any
+    if accum_signals:
+        report.print_accumulation_report(accum_signals, accum_summary)
 
     md_path = report.generate_markdown_report(
         results, f"{data_dir}/reports/pressure_latest.md"
