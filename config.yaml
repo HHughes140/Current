@@ -1,0 +1,17 @@
+# Institutional Pressure Score — Configuration
+
+fred:
+  api_key: "YOUR_FRED_API_KEY_HERE"
+
+# Historical lookback
+history:
+  start_year: 2015
+  end_year: 2025
+
+# Data paths
+data_dir: "data"
+model_dir: "data/models"
+
+# Consensus / manual overrides (optional)
+# Override specific stock pressure scores or factor values here
+overrides: {}

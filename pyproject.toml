@@ -1,0 +1,31 @@
+[project]
+name = "institutional-pressure"
+version = "0.1.0"
+description = "Institutional Pressure Score for insurance equities — model institutional demand and identify residual accumulation/distribution"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "scikit-learn>=1.3",
+    "statsmodels>=0.14",
+    "requests>=2.31",
+    "pyarrow>=14.0",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "click>=8.1",
+    "joblib>=1.3",
+    "yfinance>=0.2.30",
+    "fredapi>=0.5.2",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov"]
+
+[project.scripts]
+pressure = "src.pipeline:cli"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
